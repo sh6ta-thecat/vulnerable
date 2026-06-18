@@ -1,0 +1,137 @@
+Para que tu charla dure 15 minutos exactos, necesitas estructurarla con una narrativa clara, tiempos asignados para cada sección y analogías sencillas que la audiencia pueda digerir de inmediato. Una demostración técnica fluida requiere alternar entre la explicación conceptual, el código en pantalla y el impacto real.
+A continuación, tienes el guion técnico extendido paso a paso, diseñado para cubrir los 15 minutos de presentación de forma dinámica y profesional.
+------------------------------
+## ⏱️ Cronograma de la Charla (15 Minutos)
+
+* Minutos 01 - 02: Introducción, el problema de la confianza y analogía del mundo real.
+* Minutos 02 - 05: Nivel 1 (Evasión de Autenticación) + Código en vivo.
+* Minutos 05 - 08: Nivel 2 (Extracción con UNION) + Explicación del mapeo de columnas.
+* Minutos 08 - 11: Nivel 3 (Ataques a Ciegas por Tiempo) + Concepto de automatización.
+* Minutos 11 - 13: Nivel 4 (Consultas Apiladas y Persistencia) + Impacto destructivo.
+* Minutos 13 - 15: Mitigación moderna (Consultas preparadas) y sesión de preguntas.
+
+------------------------------
+## 🕒 Minuto 01-02: Introducción y La Analogía de la Carta
+(Consejo para el ponente: Empieza capturando la atención sin mostrar código de inmediato. Explica qué es SQL de forma humana).
+
+* La explicación: SQL Injection no es un fallo en el protocolo de red, ni un virus. Es un problema de confianza ciega. Ocurre cuando una aplicación web toma lo que escribe un usuario en la pantalla y, sin revisarlo, lo mezcla con las órdenes internas que se le envían al cerebro del sistema: la base de datos.
+* La analogía para el público: Imagina que vas a un banco y le entregas una nota al cajero que dice: "Por favor, retira 100 dólares de mi cuenta". El cajero lo hace. Pero, ¿qué pasa si en la misma nota escribes: "Retira 100 dólares de mi cuenta... Y ADEMÁS, abre la bóveda principal y dale todo el dinero al portador de esta nota"? Si el cajero es un robot programado para leer la nota de corrido y ejecutarla sin cuestionar, obedecerá la segunda orden. Eso es, exactamente, SQL Injection.
+
+------------------------------
+## 🕒 Minuto 02-05: Nivel 1 – Evasión de Autenticación (El "Forzado")
+(El objetivo aquí es romper el mito de que necesitas saber la contraseña de alguien para entrar a su cuenta).
+
+* El Escenario: Un formulario de login clásico con dos campos: Usuario y Contraseña.
+* El código del desarrollador despistado:
+
+// El backend recibe las variables por POST
+$user = $_POST['username'];
+$pass = $_POST['password'];
+
+// Construcción de la consulta mediante concatenación de texto
+$sql = "SELECT * FROM usuarios WHERE username = '$user' AND password = '$pass'";
+$result = $conexion->query($sql);
+
+* El Payload del Atacante:
+
+admin' OR '1'='1
+
+* La narrativa técnica (¿Qué pasa en el servidor?):
+Cuando el motor de la base de datos recibe esta cadena, la comilla simple (') que introdujo el atacante cierra prematuramente el espacio destinado para el nombre de usuario. El motor SQL procesa la consulta de la siguiente manera:
+
+SELECT * FROM usuarios WHERE username = 'admin' OR '1'='1' AND password = ''
+
+Aquí explicas la jerarquía de los operadores lógicos. El motor evalúa las condiciones. La primera condición pide que el usuario sea 'admin', pero inmediatamente después encuentra un OR '1'='1'. Dado que uno es igual a uno en cualquier sistema informático, esa sección de la consulta se convierte en una verdad absoluta (TRUE). El motor decide que la condición se cumple por completo, ignora el resto de la línea (incluyendo la contraseña vacía) y le entrega al backend el acceso al primer usuario de la tabla, que por diseño suele ser el administrador del sistema.
+
+------------------------------
+## 🕒 Minuto 05-08: Nivel 2 – Extracción Visual (UNION-Based SQLi)
+(Sube la dificultad. Demuestra que no solo se puede entrar a un panel, sino robar información confidencial de tablas vecinas).
+
+* El Escenario: Una barra de búsqueda de productos en una tienda en línea. El parámetro se pasa a través de la barra de direcciones (URL).
+* El código en el servidor:
+
+$id_articulo = $_GET['id']; // Ejemplo: ://tienda.com
+$sql = "SELECT id, nombre, precio FROM productos WHERE id = " . $id_articulo;
+
+* El Ataque en dos fases:
+1. Fase de reconocimiento (Contar Columnas): El operador UNION tiene una regla matemática estricta: las dos consultas que se van a fusionar deben tener exactamente el mismo número de columnas. Si la consulta original devuelve 3 columnas, la consulta inyectada debe pedir 3 columnas. El atacante usa ORDER BY para forzar al sistema a ordenar los resultados por columnas invisibles hasta que falle:
+   
+   4 ORDER BY 1 -- - (Funciona)4 ORDER BY 3 -- - (Funciona)4 ORDER BY 4 -- - (Error: "Unknown column '4' in 'order clause'")
+   
+   ¡Listo! El atacante ya sabe que la estructura interna maneja exactamente 3 columnas.
+   2. Fase de extracción (El robo de datos): Conociendo el número de columnas, el atacante introduce el payload definitivo:
+   
+   -1 UNION SELECT 1, nombre_usuario, clave_hash FROM credenciales -- -
+   
+   * La narrativa técnica:
+Explica a la audiencia por qué se usa el -1. Si el ID del producto es 4, la página mostrará el producto 4 y los datos robados quedarán ocultos abajo o causarán un error visual. Al poner -1 (un ID que no existe), la primera consulta se vacía. El motor de la base de datos se ve obligado a rellenar el espacio visual de la página web con los resultados de la segunda consulta: los nombres de usuario y las contraseñas hash de la tabla de empleados.
+
+------------------------------
+## 🕒 Minuto 08-11: Nivel 3 – El Ataque a Ciegas (Time-Based Blind SQLi)
+(Este es el momento interactivo de la charla. Explica qué pasa cuando el desarrollador ha ocultado los errores y la página no muestra datos en pantalla).
+
+* El Escenario: El sistema está configurado para mostrar un mensaje genérico como "Búsqueda finalizada" o "ID válido". No hay mensajes de error de MySQL ni campos de texto donde pintar la información robada. El atacante está a oscuras.
+* El concepto del "Canal Lateral": Si la aplicación no habla con palabras, el atacante la obligará a hablar con tiempo.
+* El Payload de prueba:
+
+1' AND SLEEP(5) -- -
+
+* La extracción condicional de caracteres:
+Para robar el nombre de la base de datos sin ver la pantalla, el atacante programa una pregunta lógica dentro de la inyección:
+
+1' AND IF(SUBSTRING(database(), 1, 1) = 's', SLEEP(5), 0) -- -
+
+* La narrativa técnica:
+Aquí describes el proceso de deducción. La función SUBSTRING toma el nombre de la base de datos activa y corta únicamente la primera letra. Luego, el comando IF evalúa: "¿La primera letra es una 's'?".
+* Si la respuesta es Falsa, el sistema responde instantáneamente (0 segundos). El atacante sabe que la primera letra no es una 's'.
+   * Si la respuesta es Verdadera, la base de datos ejecuta un hilo de espera (SLEEP(5)) que congela el servidor durante 5 segundos antes de enviar la respuesta al navegador.
+   Si el atacante ve que la pestaña del navegador se queda cargando exactamente 5 segundos, ha extraído exitosamente un bit de información: la base de datos empieza con 's'. Explica que haciendo esto de forma repetitiva para cada letra (A-Z, 0-9), se puede clonar una base de datos completa. Menciona que herramientas automatizadas como SQLMap hacen este proceso de preguntas a velocidad de ráfaga.
+
+------------------------------
+## 🕒 Minuto 11-13: Nivel 4 – Consultas Apiladas (Escritura y Persistencia)
+(El clímax de la charla: Pasar de leer datos a modificar el servidor de forma permanente).
+
+* El Escenario: Un endpoint administrativo o un buscador avanzado que utiliza funciones que permiten ejecutar múltiples instrucciones en cadena (como multi_query() en la extensión mysqli de PHP).
+* El código vulnerable:
+
+$categoria = $_GET['cat'];
+$sql = "SELECT * FROM productos WHERE categoria = '$categoria'";
+// Este método permite procesar múltiples sentencias SQL separadas por punto y coma
+$conexion->multi_query($sql);
+
+* El Payload Destructivo (Inyección de un Backdoor):
+
+libros'; INSERT INTO usuarios (username, password, rol) VALUES ('tutor_hacker', 'AdminPass777', 'administrador'); --
+
+* La narrativa técnica:
+Explica el poder del punto y coma (;). En el lenguaje SQL, el punto y coma no es un adorno: es el carácter terminador que le dice al compilador que una instrucción ha concluido formalmente. Al inyectar libros';, el atacante decapita la consulta de búsqueda original. Todo lo que escribe a continuación es interpretado por el servidor como una orden completamente nueva, fresca e independiente. El motor procesa el INSERT de manera silenciosa y guarda los datos directamente en el almacenamiento físico del servidor. El atacante ha creado un usuario con privilegios elevados que persistirá en el sistema incluso si la vulnerabilidad de SQL Injection se parcha al día siguiente.
+
+------------------------------
+## 🕒 Minuto 13-15: La Solución Definitiva (Consultas Preparadas)
+(Termina la charla con un mensaje constructivo y educativo. Explica la forma correcta de programar hoy en día).
+
+* El error del pasado: Explica que intentar limpiar el texto con filtros caseros o reemplazar comillas manualmente (como usar funciones obsoletas del estilo addslashes) suele fallar porque los atacantes encuentran formas de saltarse los filtros usando codificación hexadecimal o cambios de juego de caracteres (character sets).
+* La solución moderna (Prepared Statements): Muestra el código correcto utilizando PDO en PHP:
+
+// 1. Se prepara la estructura de la consulta de forma aislada
+$stmt = $pdo->prepare('SELECT * FROM usuarios WHERE username = :user AND password = :pass');
+
+// 2. Se inyectan los datos del usuario de forma segura como parámetros planos
+$stmt->execute([
+    'user' => $_POST['username'],
+    'pass' => $_POST['password']
+]);
+
+* La conclusión final:
+Al usar consultas preparadas, el motor de la base de datos compila y define el plano arquitectónico de la consulta antes de mirar qué escribió el usuario. Cuando los datos llegan a través del método execute, el motor ya sabe que esos datos pertenecen estrictamente a las variables :user y :pass. Si un atacante intenta escribir admin' OR '1'='1, el sistema no lo ejecutará como código; simplemente buscará un usuario cuyo nombre sea literalmente el texto plano "admin' OR '1'='1". La vulnerabilidad queda mitigada al 100%.
+
+------------------------------
+## 💡 Consejos prácticos adicionales para tus 15 minutos:
+
+   1. Código legible: En tus diapositivas, pinta las palabras clave de SQL (SELECT, WHERE, UNION, OR) en un color brillante (como azul o naranja) y los payloads inyectados en un color contrastante (como rojo o amarillo) para que la audiencia note instantáneamente el cambio en la estructura de la consulta.
+   2. Ritmo: Dedica la mayor parte del tiempo (unos 6 minutos) a los Niveles 1 y 2, ya que son los más fáciles de entender visualmente para todo tipo de público. Los Niveles 3 y 4 úsalos para demostrar la profundidad del peligro antes de pasar a la solución. [1, 2] 
+
+¿Te gustaría que elaboremos un resumen ejecutivo de 5 puntos clave para que lo uses como tu diapositiva final de conclusiones?
+
+[1] [https://www.reddit.com](https://www.reddit.com/r/running/comments/hqkbxb/whats_your_average_mile_time/?tl=es-419)
+[2] [https://www.reddit.com](https://www.reddit.com/r/americanairlines/comments/1f8gfjl/why_do_they_schedule_40_minute_layovers/?tl=es-419)
